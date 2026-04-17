@@ -1,0 +1,20 @@
+{
+  "clientes": [
+    {
+      "id": "5841657508@c.us",
+      "nombre": "Iclex Sánchez",
+      "plan": "$20",
+      "fecha_corte": "05 de cada mes",
+      "estado": "activo",
+      "sector": "Barrio Obrero"
+    },
+    {
+      "id": "584247778899@c.us",
+      "nombre": "Juan Pérez",
+      "plan": "$40",
+      "fecha_corte": "15 de cada mes",
+      "estado": "solvente",
+      "sector": "Pueblo Nuevo"
+    }
+  ]
+}
