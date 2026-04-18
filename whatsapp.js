@@ -9,6 +9,7 @@ const { MessageMedia } = require('whatsapp-web.js');
 const { crearReciboPDF } = require('./pdf-generator');
 const { notificarNuevoMensaje } = require('./api.js');
 const { client, clientesEnPausa } = require('./instancia');
+const { db } = require('./database'); // Asegúrate de tener acceso a db
 
 
 
@@ -55,6 +56,25 @@ function obtenerDatosCliente(whatsappId) {
 }
 
 
+async function obtenerMemoriaChat(whatsappId) {
+    return new Promise((resolve) => {
+        // Buscamos en la tabla 'historial'
+        const query = `SELECT rol, mensaje FROM historial WHERE whatsapp_id = ? ORDER BY timestamp DESC LIMIT 10`;
+        
+        db.all(query, [whatsappId], (err, rows) => {
+            if (err || !rows) return resolve([]);
+
+            // Mapeamos y corregimos roles para Gemini
+            const history = rows.reverse().map(r => ({
+                role: (r.rol === 'admin' || r.rol === 'model') ? 'model' : 'user',
+                parts: [{ text: r.mensaje || "" }]
+            }));
+            resolve(history);
+        });
+    });
+}
+
+
 
 
 client.on('message', async (msg) => {
@@ -84,7 +104,7 @@ client.on('message', async (msg) => {
         try {
             // Solo intentamos fetchMessages si el chat existe
             if (chat) {
-                messages = await chat.fetchMessages({ limit: 10 });
+                messages = await obtenerMemoriaChat(msg.from);
             }
         } catch (fetchError) {
             console.warn("⚠️ No se pudo obtener el historial inmediato, continuando sin contexto previo.");
@@ -211,16 +231,10 @@ client.on('message', async (msg) => {
 
         // --- CARGAR MEMORIA DEL CHAT ---
         // Pedimos los últimos 10-15 mensajes para que Gemini tenga contexto
-        const lastMessages = await chat.fetchMessages({ limit: 8 });
-        
-        // Formateamos los mensajes para que Gemini los entienda (role: user/model)
-        const history = lastMessages.map(m => {
-            return {
-                role: m.fromMe ? "model" : "user",
-                parts: [{ text: m.body }],
-            };
-        });
+        //const lastMessages = await chat.fetchMessages({ limit: 8 });
 
+        const history = await obtenerMemoriaChat(msg.from);
+        
 
         let audioBase64 = null;
         let messageText = msg.body;

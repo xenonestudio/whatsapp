@@ -95,11 +95,12 @@ async function getAIResponse(userMessage, rawHistory = [], audioData = null, mim
         try {
             // 1. Limpieza de historial (Tu lógica actual que está perfecta)
             let cleanHistory = rawHistory
-                .map(m => ({
-                    role: m.role,
-                    parts: [{ text: m.parts[0].text || "..." }]
-                }))
-                .filter(m => m.parts[0].text.trim() !== "");
+            .map(m => ({
+                // Forzamos que cualquier cosa que no sea 'user' se mapee a 'model'
+                role: m.role === "user" ? "user" : "model",
+                parts: [{ text: m.parts[0].text || "..." }]
+            }))
+            .filter(m => m.parts[0].text.trim() !== "");
 
             const firstUserIndex = cleanHistory.findIndex(m => m.role === "user");
             if (firstUserIndex !== -1) {

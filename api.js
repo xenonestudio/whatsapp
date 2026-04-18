@@ -12,11 +12,13 @@ const app = express();
 const PORT = 3000;
 const SECRET_KEY = "XENON_ESTUDIO_VALOR_SECRETO_2026"; // Mantenla segura
 
+
+
 // Creamos el servidor HTTP para que Express y Sockets compartan puerto
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:4200", // Puerto de Angular
+        origin: "*", // Puerto de Angular
         methods: ["GET", "POST"]
     }
 });
