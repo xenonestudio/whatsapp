@@ -20,11 +20,23 @@ pids
 lib-cov
 
 
-#incesesario
-descargas
-.wwebjs_cache
-.wwebjs_auth
+# Carpetas de compilación y caché
+dist/
+.wwebjs_cache/
+.wwebjs_auth/
+
+# Descargas y archivos locales
+descargas/
+
+# Bases de datos SQLite
 xenon_estudio.db
+
+# 3. Abre el archivo y pega las rutas:
+# dist/
+# descargas/
+# .wwebjs_cache/
+# .wwebjs_auth/
+# xenon_estudio.db
 
 # Coverage directory used by tools like istanbul
 coverage
