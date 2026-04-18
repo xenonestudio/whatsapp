@@ -153,3 +153,13 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+/.wwebjs_auth
+.wwebjs_auth/session/CertificateRevocation/10470/_metadata/verified_contents.json
+/.wwebjs_auth
+/.wwebjs_auth
+xenon_estudio.db
+xenon_estudio.db
+*.db
+/.wwebjs_auth
+/.wwebjs_auth/session
+/.wwebjs_auth/session/ShaderCache
