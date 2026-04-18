@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
@@ -5,12 +6,12 @@ const bcrypt = require('bcrypt');
 const { db } = require('./database');
 const { Server } = require("socket.io");
 const http = require("http");
-const { client, clientesEnPausa } = require('./instancia'); // IMPORTANTE: Mismo nombre
+const { client, clientesEnPausa } = require('./instancia');
 
 
 const app = express();
-const PORT = 3000;
-const SECRET_KEY = "XENON_ESTUDIO_VALOR_SECRETO_2026"; // Mantenla segura
+const PORT = process.env.PORT || 3000;
+const SECRET_KEY = process.env.JWT_SECRET || "XENON_ESTUDIO_VALOR_SECRETO_2026";
 
 
 
@@ -100,7 +101,7 @@ app.get('/api/config', verificarToken, (req, res) => {
 
 app.post('/api/config', verificarToken, (req, res) => {
     const { clave, valor } = req.body;
-    db.run("UPDATE configuracion SET valor = ? WHERE clave = ?", [valor, clave], function(err) {
+    db.run("UPDATE configuracion SET valor = ? WHERE clave = ?", [valor, clave], function (err) {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ updated: this.changes });
     });
@@ -116,11 +117,11 @@ app.get('/api/blacklist', verificarToken, (req, res) => {
 
 app.post('/api/blacklist', verificarToken, (req, res) => {
     const { whatsapp_id, nombre, motivo } = req.body;
-    db.run("INSERT OR REPLACE INTO blacklist (whatsapp_id, nombre, motivo) VALUES (?, ?, ?)", 
-    [whatsapp_id, nombre, motivo], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, id: whatsapp_id });
-    });
+    db.run("INSERT OR REPLACE INTO blacklist (whatsapp_id, nombre, motivo) VALUES (?, ?, ?)",
+        [whatsapp_id, nombre, motivo], function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id: whatsapp_id });
+        });
 });
 
 // Busca la ruta /api/mensajes/:whatsapp_id y reemplázala por esta:
@@ -146,9 +147,9 @@ app.get('/api/mensajes/:whatsapp_id', verificarToken, (req, res) => {
             console.error("❌ Error en la consulta:", err.message);
             return res.status(500).json({ error: err.message });
         }
-        
+
         // Si no hay mensajes, devolvemos un array vacío en lugar de error
-        res.json(rows); 
+        res.json(rows);
     });
 });
 
@@ -184,13 +185,13 @@ app.post('/api/enviar-manual', verificarToken, async (req, res) => {
 
     try {
         await client.sendMessage(whatsapp_id, mensaje);
-        
+
         // Activamos la pausa de Gemini
         clientesEnPausa.set(whatsapp_id, Date.now() + tiempoPausa);
 
         // Guardamos en historial con rol 'admin'
-        db.run("INSERT INTO historial (whatsapp_id, rol, mensaje) VALUES (?, ?, ?)", 
-               [whatsapp_id, 'admin', mensaje]);
+        db.run("INSERT INTO historial (whatsapp_id, rol, mensaje) VALUES (?, ?, ?)",
+            [whatsapp_id, 'admin', mensaje]);
 
         // Notificamos al Dashboard de Angular vía Sockets
         notificarNuevoMensaje({
@@ -217,8 +218,8 @@ app.post('/api/config/update', verificarToken, (req, res) => {
     }
 
     const query = "UPDATE configuracion SET valor = ? WHERE clave = ?";
-    
-    db.run(query, [valor, clave], function(err) {
+
+    db.run(query, [valor, clave], function (err) {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
@@ -238,6 +239,3 @@ app.post('/api/config/update', verificarToken, (req, res) => {
 
 
 // --- INICIO DEL SERVIDOR ---
-app.listen(PORT, () => {
-    console.log(`🚀 API de Xenon Estudio corriendo en http://localhost:${PORT}`);
-});
