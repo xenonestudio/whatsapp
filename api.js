@@ -7,6 +7,7 @@ const { db } = require('./database');
 const { Server } = require("socket.io");
 const http = require("http");
 const { client, clientesEnPausa } = require('./instancia');
+const { listAvailableModels } = require('./gemini-helper');
 
 
 const app = express();
@@ -34,15 +35,41 @@ const notificarNuevoMensaje = (datos) => {
     io.emit("nuevo_mensaje", datos);
 };
 
+const notificarQR = (qr) => {
+    io.emit("qr", qr);
+};
+
+const notificarEstadoConexion = (estado) => {
+    io.emit("whatsapp_status", estado);
+};
+
 // IMPORTANTE: Cambia app.listen por server.listen
 server.listen(PORT, () => {
     console.log(`🚀 API y Sockets corriendo en http://localhost:${PORT}`);
 });
 
 // Exportamos la función de notificación para usarla en whatsapp.js
-module.exports = { notificarNuevoMensaje };
+module.exports = { notificarNuevoMensaje, notificarQR, notificarEstadoConexion };
 
-app.use(cors());
+// --- CONFIGURACIÓN DE CORS Y SEGURIDAD ---
+app.use((req, res, next) => {
+    const origin = req.headers.origin || "*";
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Private-Network', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+    }
+    next();
+});
+
+app.use(cors({
+    origin: (origin, callback) => callback(null, true), // Permitir cualquier origen dinámicamente
+    credentials: true
+}));
 app.use(express.json());
 
 // --- MIDDLEWARE DE SEGURIDAD ---
@@ -97,6 +124,15 @@ app.get('/api/config', verificarToken, (req, res) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
     });
+});
+
+app.get('/api/gemini/models', verificarToken, async (req, res) => {
+    try {
+        const models = await listAvailableModels();
+        res.json(models);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
 app.post('/api/config', verificarToken, (req, res) => {
@@ -176,35 +212,39 @@ app.get('/api/conversaciones', verificarToken, (req, res) => {
 });
 
 app.post('/api/enviar-manual', verificarToken, async (req, res) => {
-    const { whatsapp_id, mensaje, tiempoPausa = 300000 } = req.body;
+    const { whatsapp_id, mensaje, replyToId, tiempoPausa = 1800000 } = req.body; // 30 min por defecto
 
-    // Validación de estado del bot
     if (!client || !client.pupPage) {
-        return res.status(503).json({ error: "WhatsApp no está vinculado o inicializado" });
+        return res.status(503).json({ error: "WhatsApp no está vinculado" });
     }
 
     try {
-        await client.sendMessage(whatsapp_id, mensaje);
+        const options = {};
+        if (replyToId) {
+            options.quotedMessageId = replyToId;
+        }
+        
+        await client.sendMessage(whatsapp_id, mensaje, options);
 
         // Activamos la pausa de Gemini
         clientesEnPausa.set(whatsapp_id, Date.now() + tiempoPausa);
 
-        // Guardamos en historial con rol 'admin'
+        // Guardamos en historial
         db.run("INSERT INTO historial (whatsapp_id, rol, mensaje) VALUES (?, ?, ?)",
             [whatsapp_id, 'admin', mensaje]);
 
-        // Notificamos al Dashboard de Angular vía Sockets
+        // Notificamos vía Sockets
         notificarNuevoMensaje({
             whatsapp_id,
             rol: 'admin',
             mensaje,
             timestamp: new Date().toISOString(),
-            nombre: "Soporte Xenon"
+            replyToId: replyToId // Pasamos la referencia si existe
         });
 
-        res.json({ success: true, mensaje: "Enviado y bot pausado" });
+        res.json({ success: true, mensaje: "Enviado con éxito" });
     } catch (error) {
-        console.error("Error manual:", error);
+        console.error("❌ Error en envío manual:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -234,6 +274,76 @@ app.post('/api/config/update', verificarToken, (req, res) => {
         console.log(`⚙️ Configuración actualizada: ${clave} = ${valor}`);
         res.json({ success: true, mensaje: `Configuración '${clave}' actualizada con éxito` });
     });
+});
+
+// --- GESTIÓN DE SESIÓN WHATSAPP ---
+app.post('/api/whatsapp/logout', verificarToken, async (req, res) => {
+    try {
+        if (client && client.pupPage) {
+            await client.logout();
+            console.log("🚪 Sesión de WhatsApp cerrada por petición del admin");
+            res.json({ success: true, mensaje: "Sesión cerrada correctamente" });
+        } else {
+            res.status(400).json({ error: "No hay una sesión activa para cerrar" });
+        }
+    } catch (error) {
+        console.error("Error al cerrar sesión:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/whatsapp/session-info', verificarToken, (req, res) => {
+    if (client && client.info) {
+        res.json({
+            connected: true,
+            pushname: client.info.pushname,
+            wid: client.info.wid,
+            platform: client.info.platform
+        });
+    } else {
+        res.json({ connected: false });
+    }
+});
+
+// --- GESTIÓN DE CONTACTOS ---
+app.get('/api/contactos', verificarToken, async (req, res) => {
+    try {
+        const { getContactos } = require('./database');
+        const contactos = await getContactos();
+        res.json(contactos);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/contactos', verificarToken, (req, res) => {
+    try {
+        const { upsertContacto } = require('./database');
+        upsertContacto(req.body);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.patch('/api/contactos/:id', verificarToken, (req, res) => {
+    try {
+        const { updateContacto } = require('./database');
+        updateContacto(req.params.id, req.body);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.delete('/api/contactos/:id', verificarToken, (req, res) => {
+    try {
+        const { deleteContacto } = require('./database');
+        deleteContacto(req.params.id);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
 

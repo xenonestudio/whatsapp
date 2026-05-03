@@ -4,12 +4,13 @@ const { textToAudio } = require('./elevenlabs-helper');
 const fs = require('fs');
 const path = require('path');
 const { log } = require('console');
-const { saveMessage, upsertCliente, savePago, isBlocked, getCliente, blockUser } = require('./database');
+const { saveMessage, upsertCliente, savePago, isBlocked, getCliente, blockUser, upsertContacto, getConfig } = require('./database');
 const { MessageMedia } = require('whatsapp-web.js');
 const { crearReciboPDF } = require('./pdf-generator');
-const { notificarNuevoMensaje } = require('./api.js');
+const { notificarNuevoMensaje, notificarQR, notificarEstadoConexion } = require('./api.js');
 const { client, clientesEnPausa } = require('./instancia');
 const { db } = require('./database'); // Asegúrate de tener acceso a db
+let inicializado = false;
 
 
 
@@ -28,16 +29,36 @@ const botEstaEnPausa = (whatsapp_id) => {
 client.on('qr', (qr) => {
     // Generate and scan this code with your phone
     console.log('QR RECEIVED', qr);
+    notificarQR(qr);
+    notificarEstadoConexion('disconnected');
 });
 
 client.on('ready', () => {
     console.log('Client is ready!');
-
+    notificarEstadoConexion('connected');
+    notificarQR(null); // Limpiar QR si ya está conectado
 });
 
 client.on('error', err => {
-    pageLogger.info('crash', err);
-    page.removeAllListeners();
+    console.error('WhatsApp Error:', err);
+    notificarEstadoConexion('error');
+});
+
+client.on('disconnected', async (reason) => {
+    console.log('WhatsApp disconnected:', reason);
+    inicializado = false; // Permitimos que startBot pueda volver a ejecutarse
+    notificarQR(null);    // Limpiamos cualquier QR viejo en el front
+    notificarEstadoConexion('disconnected');
+    
+    console.log('⏳ Re-inicializando en 5 segundos para obtener nuevo QR...');
+    setTimeout(() => {
+        if (!inicializado) {
+            client.initialize().catch(err => {
+                console.error("❌ Error al re-inicializar:", err.message);
+            });
+            inicializado = true;
+        }
+    }, 5000);
 });
 
 
@@ -123,6 +144,15 @@ client.on('message', async (msg) => {
         // Obtenemos el contacto completo del remitente
         const contact = await msg.getContact();
         const nombreContacto = contact.pushname || contact.name || "Desconocido";
+
+        // Guardamos automáticamente en la tabla de contactos del Dashboard
+        upsertContacto({
+            id: msg.from,
+            name: nombreContacto,
+            phone: contact.number,
+            saved: contact.isMyContact,
+            avatarColor: "oklch(0.65 0.2 280)" // Color por defecto de Pulse
+        });
 
         // El 'number' suele ser el formato 58412... sin el @c.us
         // Construimos el ID tradicional que ya usas en tus JSON
@@ -366,30 +396,47 @@ client.on('message', async (msg) => {
         console.error("❌ Error procesando mensaje:", err);
     }
 });
+// require('./api.js');
 
-require('./api.js');
 
+// let inicializado = false; // Eliminado de aquí, movido arriba
 
-let inicializado = false;
+// Mantener el proceso vivo
+setInterval(() => {
+    // Keep alive log opcional
+}, 60000);
 
 const startBot = () => {
     if (!inicializado) {
+        inicializado = true;
         console.log("⏳ Iniciando conexión con WhatsApp...");
         client.initialize().catch(err => {
             console.error("❌ Error crítico al inicializar:", err.message);
+            inicializado = false;
         });
-        inicializado = true;
     }
 };
 
-// Esperamos a que la API esté lista primero
-setTimeout(startBot, 5000);
+// Arrancamos el bot después de un breve delay para asegurar que la API esté lista
+setTimeout(startBot, 2000);
 
 
 
-process.on('SIGINT', async () => {
-    console.log("👋 Cerrando Xenon Estudio de forma segura...");
-    await client.destroy();
-    process.exit();
+// Manejo de errores globales para evitar que el proceso muera
+process.on('uncaughtException', (err) => {
+    console.error('❌ Error no capturado:', err);
 });
 
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Promesa no manejada:', reason);
+});
+
+/* Comentado para evitar que el proceso se cierre solo
+process.on('SIGINT', async () => {
+    console.log("\n👋 Cerrando Xenon Estudio de forma segura...");
+    try {
+        await client.destroy();
+    } catch (e) {}
+    process.exit(0);
+});
+*/

@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const axios = require("axios");
 const Bottleneck = require("bottleneck");
 require('dotenv').config();
 const fs = require('fs');
@@ -74,6 +75,7 @@ async function getAIResponse(userMessage, rawHistory = [], audioData = null, mim
     const primaryModel = await getConfig("model_name") || "gemini-flash-lite-latest";
     let systemPrompt = await getConfig("system_prompt") || "Eres el asistente de Xenon Estudio.";
     const tasaBcv = await getConfig("tasa_bcv");
+    const temperature = parseFloat(await getConfig("temperature") || "0.7");
 
     // 2. INYECTAR DATOS VARIABLES EN EL PROMPT DE SISTEMA
     // Esto asegura que la IA siempre sepa la tasa actual sin que tú la escribas a mano en el prompt.
@@ -89,6 +91,9 @@ async function getAIResponse(userMessage, rawHistory = [], audioData = null, mim
             systemInstruction: {
                 parts: [{ text: systemPrompt }],
             },
+            generationConfig: {
+                temperature: temperature,
+            }
         });
         
     return limiter.schedule(async () => {
@@ -173,7 +178,28 @@ async function getAIResponse(userMessage, rawHistory = [], audioData = null, mim
 }
 
 
-module.exports = { getAIResponse };
+async function listAvailableModels() {
+    try {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) return [];
+
+        const response = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        
+        // Filtramos para devolver solo los modelos que admiten generación de contenido
+        return (response.data.models || [])
+            .filter(m => m.supportedGenerationMethods.includes("generateContent"))
+            .map(m => ({
+                id: m.name.replace("models/", ""),
+                label: m.displayName || m.name.replace("models/", ""),
+                hint: m.description || "Sin descripción disponible"
+            }));
+    } catch (error) {
+        console.error("❌ Error al listar modelos de Gemini (REST):", error.response?.data || error.message);
+        return [];
+    }
+}
+
+module.exports = { getAIResponse, listAvailableModels };
 
 
 
